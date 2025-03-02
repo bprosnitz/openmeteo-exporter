@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var url = `https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,uv_index_clear_sky_max,precipitation_sum,rain_sum,showers_sum,snowfall_sum,precipitation_hours,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,shortwave_radiation_sum,et0_fao_evapotranspiration&timezone=America%%2FLos_Angeles&forecast_days=1`
@@ -22,9 +23,11 @@ func main() {
 	var pollInterval time.Duration
 	var latitude float64
 	var longitude float64
+	var addr string
 	flag.DurationVar(&pollInterval, "poll-interval", time.Minute, "poll frequency")
 	flag.Float64Var(&latitude, "latitude", 0, "latitude")
 	flag.Float64Var(&longitude, "longitude", 0, "longitude")
+	flag.StringVar(&addr, "addr", "0.0.0.0:9772", "server addr")
 	flag.Parse()
 
 	if latitude == 0 && longitude == 0 {
@@ -37,9 +40,20 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	go collect(ctx, pollInterval, latitude, longitude)
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	server := http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+	log.Fatal(server.ListenAndServe())
+}
+
+func collect(ctx context.Context, pollInterval time.Duration, latitude, longitude float64) {
 	fullUrl := fmt.Sprintf(url, latitude, longitude)
 	log.Printf("full url: %s", fullUrl)
-
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullUrl, strings.NewReader(""))
 		if err != nil {
@@ -57,7 +71,7 @@ func main() {
 
 		metrics.elevation.Set(response.Elevation)
 
-		metrics.current.timeSinceUpdate.Set(time.Since(response.Current.Time).Seconds())
+		//metrics.current.timeSinceUpdate.Set(time.Since(response.Current.Time).Seconds())
 		metrics.current.temperature2M.Set(response.Current.Temperature2M)
 		metrics.current.relativeHumidity2M.Set(response.Current.RelativeHumidity2M)
 		metrics.current.apparentTemperature.Set(response.Current.ApparentTemperature)
@@ -73,7 +87,7 @@ func main() {
 		metrics.current.windDirection10M.Set(response.Current.WindDirection10M)
 		metrics.current.windGusts10m.Set(response.Current.WindGusts10m)
 
-		metrics.daily.timeSinceUpdate.Set(time.Since(response.Daily.Time[0]).Seconds())
+		//metrics.daily.timeSinceUpdate.Set(time.Since(response.Daily.Time[0]).Seconds())
 		metrics.daily.weatherCode.Set(response.Daily.WeatherCode[0])
 		metrics.daily.temperature2MMax.Set(response.Daily.Temperature2MMax[0])
 		metrics.daily.temperature2MMin.Set(response.Daily.Temperature2MMin[0])
@@ -109,46 +123,46 @@ func main() {
 type response struct {
 	Elevation float64
 	Current   struct {
-		Time                time.Time `json:"time"`
-		Temperature2M       float64   `json:"temperature_2m"`
-		RelativeHumidity2M  float64   `json:"relative_humidity_2m"`
-		ApparentTemperature float64   `json:"apparent_temperature"`
-		Precipitation       float64   `json:"precipitation"`
-		Rain                float64   `json:"rain"`
-		Showers             float64   `json:"showers"`
-		Snowfall            float64   `json:"snowfall"`
-		WeatherCode         float64   `json:"weather_code"`
-		CloudCover          float64   `json:"cloud_cover"`
-		PressureMsl         float64   `json:"pressure_msl"`
-		SurfacePressure     float64   `json:"surface_pressure"`
-		WindSpeed10M        float64   `json:"wind_speed_10m"`
-		WindDirection10M    float64   `json:"wind_direction_10m"`
-		WindGusts10m        float64   `json:"wind_gusts_10m"`
+		//Time                time.Time `json:"time"`
+		Temperature2M       float64 `json:"temperature_2m"`
+		RelativeHumidity2M  float64 `json:"relative_humidity_2m"`
+		ApparentTemperature float64 `json:"apparent_temperature"`
+		Precipitation       float64 `json:"precipitation"`
+		Rain                float64 `json:"rain"`
+		Showers             float64 `json:"showers"`
+		Snowfall            float64 `json:"snowfall"`
+		WeatherCode         float64 `json:"weather_code"`
+		CloudCover          float64 `json:"cloud_cover"`
+		PressureMsl         float64 `json:"pressure_msl"`
+		SurfacePressure     float64 `json:"surface_pressure"`
+		WindSpeed10M        float64 `json:"wind_speed_10m"`
+		WindDirection10M    float64 `json:"wind_direction_10m"`
+		WindGusts10m        float64 `json:"wind_gusts_10m"`
 	} `json:"current"`
 	Daily struct {
-		Time                        []time.Time `json:"time"`
-		WeatherCode                 []float64   `json:"weather_code"`
-		Temperature2MMax            []float64   `json:"temperature_2m_max"`
-		Temperature2MMin            []float64   `json:"temperature_2m_min"`
-		ApparentTemperatureMax      []float64   `json:"apparent_temperature_max"`
-		ApparentTemperatureMin      []float64   `json:"apparent_temperature_min"`
-		Sunrise                     []time.Time `json:"sunrise"`
-		Sunset                      []time.Time `json:"sunset"`
-		DaylightDuraton             []float64   `json:"daylight_duration"`
-		SunshineDuration            []float64   `json:"sunshine_duration"`
-		UVIndexMax                  []float64   `json:"uv_index_max"`
-		UVIndexClearSkyMax          []float64   `json:"uv_index_clear_sky_max"`
-		PrecipitationSum            []float64   `json:"precipitation_sum"`
-		RainSum                     []float64   `json:"rain_sum"`
-		ShowersSum                  []float64   `json:"showers_sum"`
-		SnowfallSum                 []float64   `json:"snowfall_sum"`
-		PrecipitationHours          []float64   `json:"precipitation_hours"`
-		PrecipitationProbabilityMax []float64   `json:"precipitation_probability_max"`
-		WindSpeed10MMax             []float64   `json:"wind_speed_10m_max"`
-		WindGusts10MMax             []float64   `json:"wind_gusts_10m_max"`
-		WindDirection10MDominant    []float64   `json:"wind_direction_10m_dominant"`
-		ShortwaveRadiationSum       []float64   `json:"shortwave_radiation_sum"`
-		ET0FAOEvapotranspiration    []float64   `json:"et0_fao_evapotranspiration"`
+		//Time                        []time.Time `json:"time"`
+		WeatherCode            []float64 `json:"weather_code"`
+		Temperature2MMax       []float64 `json:"temperature_2m_max"`
+		Temperature2MMin       []float64 `json:"temperature_2m_min"`
+		ApparentTemperatureMax []float64 `json:"apparent_temperature_max"`
+		ApparentTemperatureMin []float64 `json:"apparent_temperature_min"`
+		//Sunrise                     []time.Time `json:"sunrise"`
+		//Sunset                      []time.Time `json:"sunset"`
+		DaylightDuraton             []float64 `json:"daylight_duration"`
+		SunshineDuration            []float64 `json:"sunshine_duration"`
+		UVIndexMax                  []float64 `json:"uv_index_max"`
+		UVIndexClearSkyMax          []float64 `json:"uv_index_clear_sky_max"`
+		PrecipitationSum            []float64 `json:"precipitation_sum"`
+		RainSum                     []float64 `json:"rain_sum"`
+		ShowersSum                  []float64 `json:"showers_sum"`
+		SnowfallSum                 []float64 `json:"snowfall_sum"`
+		PrecipitationHours          []float64 `json:"precipitation_hours"`
+		PrecipitationProbabilityMax []float64 `json:"precipitation_probability_max"`
+		WindSpeed10MMax             []float64 `json:"wind_speed_10m_max"`
+		WindGusts10MMax             []float64 `json:"wind_gusts_10m_max"`
+		WindDirection10MDominant    []float64 `json:"wind_direction_10m_dominant"`
+		ShortwaveRadiationSum       []float64 `json:"shortwave_radiation_sum"`
+		ET0FAOEvapotranspiration    []float64 `json:"et0_fao_evapotranspiration"`
 	} `json:"daily"`
 }
 
